@@ -22,3 +22,6 @@ go.work
 
 # dotenv
 .env
+
+# test certificates
+tls.*

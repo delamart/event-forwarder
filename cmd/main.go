@@ -64,11 +64,19 @@ func main() {
 		log.Fatal("HTTP_LISTEN environment variable not found")
 	}
 
+	certFile, _ := os.LookupEnv("TLS_CERT_FILE")
+	keyFile, _ := os.LookupEnv("TLS_KEY_FILE")
+
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "OK") })
 	go func() {
-		log.Printf("start HTTP server on %s", httpListen)
-		err = http.ListenAndServe(httpListen, nil)
+		if certFile != "" && keyFile != "" {
+			log.Printf("start HTTPS server on %s", httpListen)
+			err = http.ListenAndServeTLS(httpListen, certFile, keyFile, nil)
+		} else {
+			log.Printf("start HTTP server on %s", httpListen)
+			err = http.ListenAndServe(httpListen, nil)
+		}
 		if err != nil {
 			log.Fatalf("error starting http server: %s", err)
 		}
