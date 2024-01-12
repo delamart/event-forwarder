@@ -89,9 +89,9 @@ func main() {
 			if err != nil {
 				log.Printf("error reading POST body: %s\n", err)
 			}
-			log.Printf("received post body:\n%s\n", body)
+			fmt.Fprintf(w, "%s", body)
+			log.Printf("received POST body:\n%s\n", body)
 		}
-		fmt.Fprint(w, "OK")
 	})
 	go func() {
 		if certFile != "" && keyFile != "" {
