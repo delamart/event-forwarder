@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -64,11 +67,32 @@ func main() {
 		log.Fatal("HTTP_LISTEN environment variable not found")
 	}
 
+	token, _ := os.LookupEnv("HTTP_BEARER_TOKEN")
+	caFile, _ := os.LookupEnv("TLS_CA_FILE")
 	certFile, _ := os.LookupEnv("TLS_CERT_FILE")
 	keyFile, _ := os.LookupEnv("TLS_KEY_FILE")
 
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "OK") })
+	http.HandleFunc("/post", func(w http.ResponseWriter, r *http.Request) {
+		authorization := r.Header.Get("Authorization")
+		if token != "" && authorization != ("Bearer "+token) {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte("403 - Invalid bearer token"))
+			log.Println("error invalid authorization header sent")
+		} else if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			w.Write([]byte("405 - Method not allowed"))
+			log.Printf("error invalid method used: %s\n", r.Method)
+		} else {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				log.Printf("Error reading POST body: %s\n", err)
+			}
+			log.Printf("received post body:\n%s\n", body)
+		}
+		fmt.Fprint(w, "OK")
+	})
 	go func() {
 		if certFile != "" && keyFile != "" {
 			log.Printf("start HTTPS server on %s", httpListen)
@@ -94,6 +118,24 @@ func main() {
 	}
 	defer receiver.Close(ctx)
 
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		log.Panicf("Error loading system cert pool: %s", err)
+	}
+	if caFile != "" {
+		if caCertPEM, err := os.ReadFile(caFile); err != nil {
+			log.Panicf("Error reading file '%s': %s", caFile, err)
+		} else if ok := certPool.AppendCertsFromPEM(caCertPEM); !ok {
+			log.Panicf("Error invalid PEM certificate: %s", caFile)
+		}
+	}
+	tlsConfig := &tls.Config{
+		RootCAs: certPool,
+	}
+	tr := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+
 	for {
 		messages, err := receiver.ReceiveMessages(ctx, count, nil)
 		if err != nil {
@@ -113,8 +155,11 @@ func main() {
 				}
 
 				r.Header.Add("Content-Type", "application/json")
+				if ok {
+					r.Header.Add("Authorization", "Bearer "+token)
+				}
 
-				client := &http.Client{}
+				client := &http.Client{Transport: tr}
 				res, err := client.Do(r)
 				if err != nil {
 					log.Printf("Error posting to webhook: %s", err)
