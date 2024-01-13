@@ -1,0 +1,14 @@
+services:
+  event-forwarder:
+    build: .
+    ports:
+      - 9000:9000
+    environment:
+      - HTTP_LISTEN=:9000
+      - TLS_CERT_FILE=tls.crt
+      - TLS_KEY_FILE=tls.key
+    env_file:
+      - "./.env"
+    volumes:
+      - ./tls.key:/home/nonroot/tls.key:ro
+      - ./tls.crt:/home/nonroot/tls.crt:ro
