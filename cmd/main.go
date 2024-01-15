@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -34,6 +35,13 @@ var (
 	})
 )
 
+type opaResponse struct {
+	Result []struct {
+		Body string `json:"body"`
+		URL  string `json:"url"`
+	} `json:"result"`
+}
+
 func main() {
 	log.SetOutput(os.Stdout)
 
@@ -57,9 +65,9 @@ func main() {
 		log.Fatal("error AZURE_SERVICEBUS_QUEUE_NAME environment variable not found")
 	}
 
-	webhookUrl, ok := os.LookupEnv("WEBHOOK_URL")
+	opaUrl, ok := os.LookupEnv("OPA_URL")
 	if !ok {
-		log.Fatal("error WEBHOOK_URL environment variable not found")
+		log.Fatal("error OPA_URL environment variable not found")
 	}
 
 	httpListen, ok := os.LookupEnv("HTTP_LISTEN")
@@ -135,6 +143,7 @@ func main() {
 	tr := &http.Transport{
 		TLSClientConfig: tlsConfig,
 	}
+	http.DefaultClient.Transport = tr
 
 	for {
 		messages, err := receiver.ReceiveMessages(ctx, count, nil)
@@ -144,41 +153,76 @@ func main() {
 
 		log.Printf("retrieved %v messages\n", len(messages))
 		eventsReceived.Add(float64(len(messages)))
-		for _, message := range messages {
-			body := message.Body
+		for i, message := range messages {
+			msg := message.Body
 			func() {
-				r, err := http.NewRequest("POST", webhookUrl, bytes.NewBuffer(body))
-				if err != nil {
-					log.Printf("error creating request: %s", err)
-					eventsError.Inc()
-					return
-				}
 
-				r.Header.Add("Content-Type", "application/json")
-				if token != "" {
-					r.Header.Add("Authorization", "Bearer "+token)
-				}
-
-				client := &http.Client{Transport: tr}
-				res, err := client.Do(r)
+				input := []byte(fmt.Sprintf(`{
+					"input":%s
+				}`, msg))
+				res, err := http.Post(opaUrl, "application/json", bytes.NewBuffer(input))
 				if err != nil {
-					log.Printf("error posting to webhook: %s", err)
+					log.Printf("error posting to opa: %s", err)
 					eventsError.Inc()
 					return
 				}
 				defer res.Body.Close()
 
-				if res.StatusCode != http.StatusOK {
-					log.Printf("error POST to %s returned status code: %v", webhookUrl, res.StatusCode)
+				result, err := io.ReadAll(res.Body)
+				if err != nil {
+					log.Printf("error parsing opa response: %s", err)
 					eventsError.Inc()
 					return
+				}
+
+				var response opaResponse
+				err = json.Unmarshal(result, &response)
+				if err != nil {
+					log.Printf("error parsing opa response: %s", err)
+					eventsError.Inc()
+					return
+				}
+
+				log.Printf("OPA returned %v forwards for message %v\n", len(response.Result), i)
+				for _, fwd := range response.Result {
+					webhookUrl := fwd.URL
+					body := []byte(fwd.Body)
+					log.Printf("forward message to %s\n", webhookUrl)
+
+					r, err := http.NewRequest("POST", webhookUrl, bytes.NewBuffer(body))
+					if err != nil {
+						log.Printf("error creating request: %s", err)
+						eventsError.Inc()
+						continue
+					}
+
+					r.Header.Add("Content-Type", "application/json")
+					if token != "" {
+						r.Header.Add("Authorization", "Bearer "+token)
+					}
+
+					client := &http.Client{Transport: tr}
+					res, err = client.Do(r)
+					if err != nil {
+						log.Printf("error posting to webhook: %s", err)
+						eventsError.Inc()
+						continue
+					}
+					defer res.Body.Close()
+
+					if res.StatusCode != http.StatusOK {
+						log.Printf("error POST to %s returned status code: %v", webhookUrl, res.StatusCode)
+						eventsError.Inc()
+						continue
+					}
+
+					eventsForwarded.Inc()
 				}
 			}()
 			err = receiver.CompleteMessage(ctx, message, nil)
 			if err != nil {
 				log.Fatalf("error completing messages: %s", err)
 			}
-			eventsForwarded.Inc()
 		}
 	}
 }
