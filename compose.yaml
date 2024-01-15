@@ -7,7 +7,7 @@ services:
     ports:
       - 9000:9000
     environment:
-      - OPA_URL=http://opa:8181
+      - OPA_URL=http://opa:8181/v1/data/events/forward
       - HTTP_LISTEN=:9000
       - TLS_CERT_FILE=tls.crt
       - TLS_KEY_FILE=tls.key
