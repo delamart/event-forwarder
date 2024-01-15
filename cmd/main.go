@@ -153,13 +153,12 @@ func main() {
 
 		log.Printf("retrieved %v messages\n", len(messages))
 		eventsReceived.Add(float64(len(messages)))
-		for i, message := range messages {
+		for _, message := range messages {
+			id := message.MessageID
 			msg := message.Body
 			func() {
 
-				input := []byte(fmt.Sprintf(`{
-					"input":%s
-				}`, msg))
+				input := []byte(fmt.Sprintf(`{"input":{"id":"%s","message":%s}}`, id, msg))
 				res, err := http.Post(opaUrl, "application/json", bytes.NewBuffer(input))
 				if err != nil {
 					log.Printf("error posting to opa: %s", err)
@@ -183,11 +182,11 @@ func main() {
 					return
 				}
 
-				log.Printf("OPA returned %v forwards for message %v\n", len(response.Result), i)
+				log.Printf("OPA returned %v forwards for message %v\n", len(response.Result), id)
 				for _, fwd := range response.Result {
 					webhookUrl := fwd.URL
 					body := []byte(fwd.Body)
-					log.Printf("forward message to %s\n", webhookUrl)
+					log.Printf("forward message %s to %s\n", id, webhookUrl)
 
 					r, err := http.NewRequest("POST", webhookUrl, bytes.NewBuffer(body))
 					if err != nil {
