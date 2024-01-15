@@ -155,7 +155,7 @@ func main() {
 				}
 
 				r.Header.Add("Content-Type", "application/json")
-				if ok {
+				if token != "" {
 					r.Header.Add("Authorization", "Bearer "+token)
 				}
 
