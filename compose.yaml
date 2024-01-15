@@ -1,6 +1,9 @@
 services:
   event-forwarder:
-    build: .
+    build:
+      context: .
+      args:
+        - BUILD_IMAGE=golang:1.21
     ports:
       - 9000:9000
     environment:

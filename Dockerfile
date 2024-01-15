@@ -1,4 +1,5 @@
-FROM golang:1.21 as build
+ARG BUILD_IMAGE=golang:1.21
+FROM ${BUILD_IMAGE} as build
 
 WORKDIR /usr/src/app
 
